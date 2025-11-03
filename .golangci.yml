@@ -1,0 +1,32 @@
+version: 2
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - dupl
+    - goconst
+    - gocyclo
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+
+linters-settings:
+  gosec:
+    excludes:
+      - G304  # File path from variable - acceptable in tests with t.TempDir()
+      - G306  # File permissions - test files don't need strict perms
+
+issues:
+  exclude-rules:
+    - path: _test\.go$
+      linters:
+        - dupl
+        - goconst
+
+run:
+  timeout: 5m
