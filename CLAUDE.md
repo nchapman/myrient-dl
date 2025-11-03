@@ -22,8 +22,8 @@ The codebase has been significantly improved with the following enhancements:
 - **Better Retry Backoff**: Implemented exponential backoff with jitter (instead of linear) for retries
 - **Build Version Info**: Added version, commit, and build time information via ldflags
 - **Dependency Management**: Added dependabot.yml for automated dependency updates
-- **Linting**: Enabled gosec linter for security checks
-- **Go Version**: Updated from Go 1.21 to Go 1.23
+- **Linting**: Upgraded to golangci-lint v2 for enhanced linting capabilities
+- **Go Version**: Project requires Go 1.24+, CI tests on Go 1.24 and 1.25 (officially supported versions)
 
 ## Build and Development Commands
 
