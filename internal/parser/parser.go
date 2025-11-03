@@ -2,6 +2,7 @@
 package parser
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,9 +22,17 @@ type FileInfo struct {
 }
 
 // ParseDirectoryListing fetches and parses an Apache-style directory listing
-func ParseDirectoryListing(directoryURL string) ([]FileInfo, error) {
+func ParseDirectoryListing(ctx context.Context, directoryURL string) ([]FileInfo, error) {
 	// Fetch the directory listing
-	resp, err := http.Get(directoryURL) //nolint:gosec // URL is user-provided by design
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, directoryURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set User-Agent for polite web scraping
+	req.Header.Set("User-Agent", "myrient-dl/1.0 (https://github.com/nchapman/myrient-dl)")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch directory: %w", err)
 	}
@@ -47,9 +56,9 @@ func parseHTML(r io.Reader, baseURL string) ([]FileInfo, error) {
 
 	var files []FileInfo
 
-	// Apache directory listings use <a> tags for file links
-	// We look for links that are NOT the parent directory (..)
-	doc.Find("a").Each(func(_ int, s *goquery.Selection) {
+	// Apache directory listings use <a> tags for file links within table#list
+	// We constrain to table#list to avoid picking up navigation links
+	doc.Find("table#list a").Each(func(_ int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if !exists {
 			return

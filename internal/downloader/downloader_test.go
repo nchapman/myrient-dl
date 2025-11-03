@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,7 +22,7 @@ func TestDownloader_GetRemoteFileSize(t *testing.T) {
 	defer server.Close()
 
 	dl := New(Config{})
-	size, err := dl.getRemoteFileSize(server.URL)
+	size, err := dl.getRemoteFileSize(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestDownloader_GetRemoteFileSize_ServerError(t *testing.T) {
 	defer server.Close()
 
 	dl := New(Config{})
-	_, err := dl.getRemoteFileSize(server.URL)
+	_, err := dl.getRemoteFileSize(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for 404 response, got nil")
 	}
@@ -74,14 +75,14 @@ func TestDownloader_DownloadFile(t *testing.T) {
 		Size: 17,
 	}
 
-	err := dl.downloadFile(file)
+	err := dl.downloadFile(context.Background(), file)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify file was created
 	outputPath := filepath.Join(tmpDir, "test.zip")
-	content, err := os.ReadFile(outputPath)
+	content, err := os.ReadFile(outputPath) //nolint:gosec // Test file path is safe (from t.TempDir)
 	if err != nil {
 		t.Fatalf("failed to read downloaded file: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestDownloader_SkipExistingFile(t *testing.T) {
 	// Create temp directory with existing file
 	tmpDir := t.TempDir()
 	existingFile := filepath.Join(tmpDir, "existing.zip")
-	if err := os.WriteFile(existingFile, testContent, 0644); err != nil {
+	if err := os.WriteFile(existingFile, testContent, 0600); err != nil { //nolint:gosec // Test file permissions can be restrictive
 		t.Fatalf("failed to create existing file: %v", err)
 	}
 
@@ -126,7 +127,7 @@ func TestDownloader_SkipExistingFile(t *testing.T) {
 		Size: 16,
 	}
 
-	err := dl.downloadFile(file)
+	err := dl.downloadFile(context.Background(), file)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestDownloader_SkipExistingFile(t *testing.T) {
 	}
 
 	// Verify original content is unchanged
-	content, err := os.ReadFile(existingFile)
+	content, err := os.ReadFile(existingFile) //nolint:gosec // Test file path is safe (from t.TempDir)
 	if err != nil {
 		t.Fatalf("failed to read existing file: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestDownloader_RedownloadWrongSize(t *testing.T) {
 	// Create temp directory with existing file of wrong size
 	tmpDir := t.TempDir()
 	existingFile := filepath.Join(tmpDir, "wrong.zip")
-	if err := os.WriteFile(existingFile, []byte("old"), 0644); err != nil {
+	if err := os.WriteFile(existingFile, []byte("old"), 0600); err != nil { //nolint:gosec // Test file permissions can be restrictive
 		t.Fatalf("failed to create existing file: %v", err)
 	}
 
@@ -184,7 +185,7 @@ func TestDownloader_RedownloadWrongSize(t *testing.T) {
 		Size: 11,
 	}
 
-	err := dl.downloadFile(file)
+	err := dl.downloadFile(context.Background(), file)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestDownloader_RedownloadWrongSize(t *testing.T) {
 	}
 
 	// Verify new content
-	content, err := os.ReadFile(existingFile)
+	content, err := os.ReadFile(existingFile) //nolint:gosec // Test file path is safe (from t.TempDir)
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 		{Name: "file2.zip", URL: server.URL + "/file2.zip", Size: 5},
 	}
 
-	err := dl.DownloadAll(files)
+	err := dl.DownloadAll(context.Background(), files)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

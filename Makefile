@@ -4,6 +4,16 @@
 BINARY_NAME=myrient-dl
 COVERAGE_FILE=coverage.out
 
+# Version info
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+
+# Linker flags for version info
+LDFLAGS := -ldflags "-X github.com/nchapman/myrient-dl/internal/version.Version=$(VERSION) \
+                     -X github.com/nchapman/myrient-dl/internal/version.GitCommit=$(GIT_COMMIT) \
+                     -X github.com/nchapman/myrient-dl/internal/version.BuildTime=$(BUILD_TIME)"
+
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
@@ -11,7 +21,7 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 build: ## Build the binary
-	go build -o $(BINARY_NAME) .
+	go build $(LDFLAGS) -o $(BINARY_NAME) .
 
 install: ## Install the binary to GOPATH/bin
 	go install

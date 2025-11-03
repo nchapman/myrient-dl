@@ -2,8 +2,11 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,7 +42,7 @@ func New(config Config) *Downloader {
 }
 
 // DownloadAll downloads all files with progress tracking
-func (d *Downloader) DownloadAll(files []parser.FileInfo) error {
+func (d *Downloader) DownloadAll(ctx context.Context, files []parser.FileInfo) error {
 	total := len(files)
 
 	if d.config.Parallel == 1 {
@@ -47,32 +50,50 @@ func (d *Downloader) DownloadAll(files []parser.FileInfo) error {
 		for i, file := range files {
 			fmt.Printf("\n[%d/%d] Downloading: %s\n", i+1, total, file.Name)
 
-			if err := d.downloadFileWithRetry(file); err != nil {
+			if err := d.downloadFileWithRetry(ctx, file); err != nil {
 				return fmt.Errorf("failed to download %s: %w", file.Name, err)
 			}
 		}
 	} else {
 		// Parallel downloads
-		return d.downloadParallel(files)
+		return d.downloadParallel(ctx, files)
 	}
 
 	return nil
 }
 
-// downloadFileWithRetry downloads a single file with retry logic
-func (d *Downloader) downloadFileWithRetry(file parser.FileInfo) error {
+// downloadFileWithRetry downloads a single file with retry logic using exponential backoff with jitter
+func (d *Downloader) downloadFileWithRetry(ctx context.Context, file parser.FileInfo) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= d.config.RetryAttempts; attempt++ {
-		err := d.downloadFile(file)
+		err := d.downloadFile(ctx, file)
 		if err == nil {
 			return nil
 		}
 
 		lastErr = err
 		if attempt < d.config.RetryAttempts {
-			fmt.Printf("  ⚠ Attempt %d failed, retrying...\n", attempt)
-			time.Sleep(time.Second * time.Duration(attempt)) // Exponential backoff
+			// Exponential backoff with jitter
+			// Base delay: 1s, exponentially increases with each attempt
+			// Jitter: ±25% randomization to prevent thundering herd
+			baseDelay := time.Second * time.Duration(math.Pow(2, float64(attempt-1)))
+			jitter := time.Duration(float64(baseDelay) * 0.25 * (2*rand.Float64() - 1)) //nolint:gosec // Non-cryptographic random for backoff jitter is acceptable
+			backoff := baseDelay + jitter
+
+			// Cap at 30 seconds
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+
+			fmt.Printf("  ⚠ Attempt %d failed, retrying in %v...\n", attempt, backoff.Round(time.Millisecond))
+
+			// Wait with context support
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
 
@@ -80,11 +101,11 @@ func (d *Downloader) downloadFileWithRetry(file parser.FileInfo) error {
 }
 
 // downloadFile downloads a single file with progress bar
-func (d *Downloader) downloadFile(file parser.FileInfo) error {
+func (d *Downloader) downloadFile(ctx context.Context, file parser.FileInfo) error {
 	outputPath := filepath.Join(d.config.OutputDir, file.Name)
 
 	// Get the actual file size from the server
-	actualSize, err := d.getRemoteFileSize(file.URL)
+	actualSize, err := d.getRemoteFileSize(ctx, file.URL)
 	if err != nil {
 		return fmt.Errorf("failed to get file size: %w", err)
 	}
@@ -101,8 +122,16 @@ func (d *Downloader) downloadFile(file parser.FileInfo) error {
 		}
 	}
 
-	// Create the request
-	resp, err := d.client.Get(file.URL)
+	// Create the request with context
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, file.URL, nil)
+	if err != nil {
+		return err
+	}
+
+	// Set User-Agent for polite web scraping
+	req.Header.Set("User-Agent", "myrient-dl/1.0 (https://github.com/nchapman/myrient-dl)")
+
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -114,13 +143,16 @@ func (d *Downloader) downloadFile(file parser.FileInfo) error {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
-	// Create the output file
-	out, err := os.Create(outputPath) //nolint:gosec // File path is controlled by config and filename from server
+	// Create temp file for atomic write
+	tempPath := outputPath + ".tmp"
+	out, err := os.Create(tempPath) //nolint:gosec // File path is controlled by config and filename from server
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = out.Close()
+		// Clean up temp file if it still exists
+		_ = os.Remove(tempPath)
 	}()
 
 	// Create progress bar
@@ -135,13 +167,31 @@ func (d *Downloader) downloadFile(file parser.FileInfo) error {
 		return err
 	}
 
+	// Close before rename
+	if err := out.Close(); err != nil {
+		return err
+	}
+
+	// Atomic rename
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		return err
+	}
+
 	fmt.Println() // New line after progress bar
 	return nil
 }
 
 // getRemoteFileSize makes a HEAD request to get the actual file size from the server
-func (d *Downloader) getRemoteFileSize(url string) (int64, error) {
-	resp, err := d.client.Head(url)
+func (d *Downloader) getRemoteFileSize(ctx context.Context, url string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	// Set User-Agent for polite web scraping
+	req.Header.Set("User-Agent", "myrient-dl/1.0 (https://github.com/nchapman/myrient-dl)")
+
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -157,7 +207,10 @@ func (d *Downloader) getRemoteFileSize(url string) (int64, error) {
 }
 
 // downloadParallel downloads files in parallel
-func (d *Downloader) downloadParallel(files []parser.FileInfo) error {
+func (d *Downloader) downloadParallel(ctx context.Context, files []parser.FileInfo) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var (
 		wg        sync.WaitGroup
 		errCh     = make(chan error, len(files))
@@ -173,8 +226,19 @@ func (d *Downloader) downloadParallel(files []parser.FileInfo) error {
 		go func(f parser.FileInfo) {
 			defer wg.Done()
 
+			// Check if context is cancelled
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			// Acquire semaphore
-			semaphore <- struct{}{}
+			select {
+			case semaphore <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-semaphore }()
 
 			mu.Lock()
@@ -183,8 +247,9 @@ func (d *Downloader) downloadParallel(files []parser.FileInfo) error {
 
 			fmt.Printf("\n[%d/%d] Downloading: %s\n", current, total, f.Name)
 
-			if err := d.downloadFileWithRetry(f); err != nil {
+			if err := d.downloadFileWithRetry(ctx, f); err != nil {
 				errCh <- fmt.Errorf("failed to download %s: %w", f.Name, err)
+				cancel() // Cancel all other downloads on first error
 				return
 			}
 
@@ -198,9 +263,19 @@ func (d *Downloader) downloadParallel(files []parser.FileInfo) error {
 	wg.Wait()
 	close(errCh)
 
-	// Check for errors
-	if len(errCh) > 0 {
-		return <-errCh
+	// Collect all errors
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	// Return first error if any
+	if len(errs) > 0 {
+		if len(errs) == 1 {
+			return errs[0]
+		}
+		// Multiple errors - return first with count
+		return fmt.Errorf("%w (and %d other error(s))", errs[0], len(errs)-1)
 	}
 
 	return nil

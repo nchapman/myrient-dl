@@ -4,7 +4,7 @@ A fast and friendly CLI tool for downloading files from [Myrient](https://myrien
 
 ## Installation
 
-**Requires Go 1.21 or later**
+**Requires Go 1.22 or later**
 
 ```bash
 go install github.com/nchapman/myrient-dl@latest

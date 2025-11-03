@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +17,7 @@ func TestParseDirectoryListing(t *testing.T) {
  </head>
  <body>
 <h1>Index of /files/arcade</h1>
-  <table>
+  <table id="list">
    <tr><th valign="top">&nbsp;</th><th><a href="?C=N;O=D">Name</a></th><th><a href="?C=M;O=A">Last modified</a></th><th><a href="?C=S;O=A">Size</a></th></tr>
    <tr><th colspan="4"><hr></th></tr>
 <tr><td valign="top">&nbsp;</td><td><a href="../">Parent Directory</a></td><td>&nbsp;</td><td align="right">  - </td></tr>
@@ -38,7 +39,7 @@ func TestParseDirectoryListing(t *testing.T) {
 	defer server.Close()
 
 	// Parse the directory listing
-	files, err := ParseDirectoryListing(server.URL)
+	files, err := ParseDirectoryListing(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("failed to parse directory listing: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestParseDirectoryListing_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ParseDirectoryListing(server.URL)
+	_, err := ParseDirectoryListing(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for server error response, got nil")
 	}
@@ -101,7 +102,7 @@ func TestParseDirectoryListing_EmptyListing(t *testing.T) {
 <html>
 <body>
 <h1>Index of /empty</h1>
-<table>
+<table id="list">
 <tr><td><a href="../">Parent Directory</a></td></tr>
 </table>
 </body>
@@ -114,7 +115,7 @@ func TestParseDirectoryListing_EmptyListing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	files, err := ParseDirectoryListing(server.URL)
+	files, err := ParseDirectoryListing(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,5 +202,52 @@ func TestBuildAbsoluteURL_InvalidBase(t *testing.T) {
 	_, err := buildAbsoluteURL("ht\ntp://example.com", "file.zip")
 	if err == nil {
 		t.Error("expected error for invalid base URL, got nil")
+	}
+}
+
+func TestParseDirectoryListing_IgnoresLinksOutsideTable(t *testing.T) {
+	// Test that links outside table#list are ignored (e.g., navigation links)
+	html := `<!DOCTYPE HTML>
+<html>
+<head>
+  <title>Index of /files</title>
+</head>
+<body>
+<h1>Index of /files</h1>
+<nav>
+  <a href="https://discord.gg/example">Discord</a>
+  <a href="https://t.me/example">Telegram</a>
+  <a href="https://hshop.example">hShop</a>
+</nav>
+<table id="list">
+  <tr><th><a href="?C=N;O=D">Name</a></th><th><a href="?C=S;O=A">Size</a></th></tr>
+  <tr><td><a href="../">Parent Directory</a></td><td>-</td></tr>
+  <tr><td><a href="file1.zip">file1.zip</a></td><td>1.0 MiB</td></tr>
+</table>
+<footer>
+  <a href="/about">About</a>
+</footer>
+</body>
+</html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	files, err := ParseDirectoryListing(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only find file1.zip, not Discord, Telegram, hShop, or About links
+	if len(files) != 1 {
+		t.Errorf("expected 1 file, got %d", len(files))
+	}
+
+	if len(files) > 0 && files[0].Name != "file1.zip" {
+		t.Errorf("expected file1.zip, got %s", files[0].Name)
 	}
 }

@@ -2,15 +2,19 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
 
 	"github.com/nchapman/myrient-dl/internal/downloader"
 	"github.com/nchapman/myrient-dl/internal/matcher"
 	"github.com/nchapman/myrient-dl/internal/parser"
+	"github.com/nchapman/myrient-dl/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -25,8 +29,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "myrient-dl [URL]",
-	Short: "Download files from Myrient directory listings",
+	Use:     "myrient-dl [URL]",
+	Short:   "Download files from Myrient directory listings",
+	Version: version.Version,
 	Long: `A fast and friendly CLI tool to download files from Myrient.
 
 Downloads files from Myrient directory listings with support for include/exclude patterns,
@@ -51,9 +56,25 @@ func init() {
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be downloaded without downloading")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	rootCmd.Flags().IntVarP(&retryAttempts, "retry", "r", 3, "Number of retry attempts for failed downloads")
+
+	// Custom version template with more details
+	rootCmd.SetVersionTemplate("{{.Version}}\n" + version.Info() + "\n")
 }
 
 func run(_ *cobra.Command, args []string) error {
+	// Set up context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle signals for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Printf("\n\nReceived signal %v, shutting down gracefully...\n", sig)
+		cancel()
+	}()
+
 	targetURL := args[0]
 
 	// Validate URL
@@ -80,7 +101,7 @@ func run(_ *cobra.Command, args []string) error {
 
 	// Parse directory listing
 	fmt.Println("Fetching directory listing...")
-	files, err := parser.ParseDirectoryListing(targetURL)
+	files, err := parser.ParseDirectoryListing(ctx, targetURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse directory listing: %w", err)
 	}
@@ -132,7 +153,7 @@ func run(_ *cobra.Command, args []string) error {
 		Verbose:       verbose,
 	})
 
-	if err := dl.DownloadAll(filtered); err != nil {
+	if err := dl.DownloadAll(ctx, filtered); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
@@ -176,8 +197,21 @@ func sanitizeFilename(name string) string {
 		"\"", "_",
 		"?", "_",
 		"*", "_",
+		"/", "_",
+		"\\", "_",
+		"\x00", "_", // null byte
 	)
-	return replacer.Replace(name)
+	result := replacer.Replace(name)
+
+	// Remove leading dots to prevent hidden files
+	result = strings.TrimLeft(result, ".")
+
+	// Prevent directory traversal
+	if strings.Contains(result, "..") {
+		result = strings.ReplaceAll(result, "..", "_")
+	}
+
+	return result
 }
 
 // formatBytes formats byte sizes in human-readable format

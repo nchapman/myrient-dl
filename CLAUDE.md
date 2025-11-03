@@ -6,6 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 myrient-dl is a CLI tool for downloading files from Myrient (https://myrient.erista.me/) directory listings. It's built in Go using the Cobra CLI framework and provides features like pattern matching, parallel downloads, progress tracking, and auto-retry.
 
+## Recent Improvements (2025-11-03)
+
+The codebase has been significantly improved with the following enhancements:
+
+### High Priority Improvements
+- **Context Support**: Added `context.Context` throughout the codebase for proper cancellation and timeout support
+- **Atomic File Writes**: Downloads now write to temporary files and atomically rename on success, preventing corrupted partial files
+- **Improved Error Handling**: Parallel downloads now properly cancel on errors and report multiple failures
+- **Enhanced Path Sanitization**: Strengthened file path sanitization to prevent directory traversal, null bytes, and hidden files
+- **Graceful Shutdown**: Added signal handling (SIGINT/SIGTERM) for clean cancellation of downloads
+- **User-Agent Header**: Added proper User-Agent to all HTTP requests for web scraping etiquette
+
+### Medium Priority Improvements
+- **Better Retry Backoff**: Implemented exponential backoff with jitter (instead of linear) for retries
+- **Build Version Info**: Added version, commit, and build time information via ldflags
+- **Dependency Management**: Added dependabot.yml for automated dependency updates
+- **Linting**: Enabled gosec linter for security checks
+- **Go Version**: Updated from Go 1.21 to Go 1.23
+
 ## Build and Development Commands
 
 ```bash
@@ -68,24 +87,33 @@ The codebase follows a clean architecture with three main internal packages:
 
 - **internal/downloader**: Download orchestration with progress tracking
   - Supports both serial and parallel downloads (semaphore-based concurrency)
-  - Retry logic with exponential backoff
+  - Retry logic with exponential backoff and jitter
   - Progress bars using schollz/progressbar
   - Smart resume: HEAD request to check remote size, skips if local file matches
   - 30-minute timeout for large files
+  - Atomic file writes (write to .tmp, rename on success)
+  - Context-aware cancellation
+
+- **internal/version**: Version information
+  - Provides version, git commit, and build time
+  - Populated via ldflags during build
 
 ### Data Flow
 
-1. User provides Myrient URL → cmd validates and parses flags
-2. parser.ParseDirectoryListing() → fetches HTML, extracts FileInfo structs
+1. User provides Myrient URL → cmd validates and parses flags, sets up context with signal handling
+2. parser.ParseDirectoryListing(ctx) → fetches HTML with context, extracts FileInfo structs
 3. matcher.Filter() → applies include/exclude patterns
-4. downloader.DownloadAll() → downloads with progress tracking and retry
+4. downloader.DownloadAll(ctx) → downloads with progress tracking, retry, and context cancellation
 
 ### Key Design Decisions
 
 - **Default parallel=1**: Intentionally respectful to Myrient's servers
 - **Auto-resume**: HEAD requests verify file size before re-downloading
 - **Output directory**: Auto-extracted from URL's last path component, sanitized for filesystem
-- **Error handling**: Retry with exponential backoff, detailed error wrapping
+- **Error handling**: Retry with exponential backoff and jitter, detailed error wrapping
+- **Context-driven**: All network operations support cancellation via context
+- **Atomic writes**: Prevents partial file corruption on interruption
+- **Path safety**: Strong sanitization against directory traversal and malicious filenames
 
 ## Testing
 
@@ -102,8 +130,18 @@ Tests use table-driven patterns and focus on parsing logic, pattern matching, an
 - github.com/PuerkitoBio/goquery: HTML parsing
 - github.com/schollz/progressbar/v3: Progress visualization
 
+## Version Information
+
+The binary includes version information that can be viewed with `./myrient-dl --version`:
+- Version: Git tag or commit hash
+- Git Commit: Short commit hash
+- Build Time: UTC timestamp
+
+This information is injected at build time via ldflags in the Makefile.
+
 ## Notes
 
 - The tool targets Apache-style directory listings specifically (Myrient's format)
+- Parser searches for links within `table#list` only, ignoring navigation links elsewhere on the page
 - File size extraction uses multiple strategies (table cells, rows, parent text) to handle HTML variations
 - nolint directives are used for gosec warnings where the risk is acceptable (user-provided URLs, configured file paths)
