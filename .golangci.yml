@@ -1,6 +1,7 @@
-version: 2
+version: "2"
 
 linters:
+  default: none  # Start with no linters, then enable specific ones
   enable:
     - errcheck
     - govet
@@ -15,19 +16,17 @@ linters:
     - unconvert
     - unparam
     - gosec
-
-linters-settings:
-  gosec:
-    excludes:
-      - G304  # File path from variable - acceptable in tests with t.TempDir()
-      - G306  # File permissions - test files don't need strict perms
-
-issues:
-  exclude-rules:
-    - path: _test\.go$
-      linters:
-        - dupl
-        - goconst
+  settings:
+    gosec:
+      excludes:
+        - G304  # File path from variable - acceptable in tests with t.TempDir()
+        - G306  # File permissions - test files don't need strict perms
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters:
+          - dupl
+          - goconst
 
 run:
   timeout: 5m
