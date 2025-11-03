@@ -19,13 +19,13 @@ import (
 )
 
 var (
-	outputDir      string
-	includePattern string
-	excludePattern string
-	parallel       int
-	dryRun         bool
-	verbose        bool
-	retryAttempts  int
+	outputDir       string
+	includePatterns []string
+	excludePatterns []string
+	parallel        int
+	dryRun          bool
+	verbose         bool
+	retryAttempts   int
 )
 
 var rootCmd = &cobra.Command{
@@ -50,8 +50,8 @@ func Execute() {
 
 func init() {
 	rootCmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory (defaults to last path component of URL)")
-	rootCmd.Flags().StringVarP(&includePattern, "include", "i", "*", "Include pattern (glob syntax)")
-	rootCmd.Flags().StringVarP(&excludePattern, "exclude", "e", "", "Exclude pattern (glob syntax)")
+	rootCmd.Flags().StringArrayVarP(&includePatterns, "include", "i", []string{"*"}, "Include pattern (glob syntax, repeatable)")
+	rootCmd.Flags().StringArrayVarP(&excludePatterns, "exclude", "e", []string{}, "Exclude pattern (glob syntax, repeatable)")
 	rootCmd.Flags().IntVarP(&parallel, "parallel", "p", 1, "Number of parallel downloads")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be downloaded without downloading")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
@@ -91,9 +91,9 @@ func run(_ *cobra.Command, args []string) error {
 	if verbose {
 		fmt.Printf("Target URL: %s\n", targetURL)
 		fmt.Printf("Output directory: %s\n", outputDir)
-		fmt.Printf("Include pattern: %s\n", includePattern)
-		if excludePattern != "" {
-			fmt.Printf("Exclude pattern: %s\n", excludePattern)
+		fmt.Printf("Include patterns: %v\n", includePatterns)
+		if len(excludePatterns) > 0 {
+			fmt.Printf("Exclude patterns: %v\n", excludePatterns)
 		}
 		fmt.Printf("Parallel downloads: %d\n", parallel)
 		fmt.Println()
@@ -115,7 +115,7 @@ func run(_ *cobra.Command, args []string) error {
 	}
 
 	// Filter files based on patterns
-	m := matcher.New(includePattern, excludePattern)
+	m := matcher.New(includePatterns, excludePatterns)
 	filtered := m.Filter(files)
 
 	if len(filtered) == 0 {

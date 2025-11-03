@@ -9,15 +9,15 @@ import (
 
 // Matcher handles include/exclude pattern matching
 type Matcher struct {
-	includePattern string
-	excludePattern string
+	includePatterns []string
+	excludePatterns []string
 }
 
 // New creates a new Matcher with the given patterns
-func New(include, exclude string) *Matcher {
+func New(include, exclude []string) *Matcher {
 	return &Matcher{
-		includePattern: include,
-		excludePattern: exclude,
+		includePatterns: include,
+		excludePatterns: exclude,
 	}
 }
 
@@ -36,22 +36,39 @@ func (m *Matcher) Filter(files []parser.FileInfo) []parser.FileInfo {
 
 // matches checks if a filename matches the include/exclude criteria
 func (m *Matcher) matches(filename string) bool {
-	// Check include pattern
-	if m.includePattern != "" && m.includePattern != "*" {
-		matched, err := filepath.Match(m.includePattern, filename)
-		if err != nil || !matched {
+	// Check include patterns (OR logic - must match at least one)
+	if len(m.includePatterns) > 0 {
+		matchedAny := false
+		for _, pattern := range m.includePatterns {
+			if pattern == "" || pattern == "*" {
+				matchedAny = true
+				break
+			}
+			matched, err := filepath.Match(pattern, filename)
+			if err != nil {
+				continue // Skip invalid patterns
+			}
+			if matched {
+				matchedAny = true
+				break
+			}
+		}
+		if !matchedAny {
 			return false
 		}
 	}
 
-	// Check exclude pattern
-	if m.excludePattern != "" {
-		matched, err := filepath.Match(m.excludePattern, filename)
+	// Check exclude patterns (OR logic - excluded if matches any)
+	for _, pattern := range m.excludePatterns {
+		if pattern == "" {
+			continue
+		}
+		matched, err := filepath.Match(pattern, filename)
 		if err != nil {
-			return true // If pattern is invalid, don't exclude
+			continue // Skip invalid patterns
 		}
 		if matched {
-			return false
+			return false // Exclude if any pattern matches
 		}
 	}
 

@@ -35,7 +35,7 @@ This will:
 ## Features
 
 - **Smart defaults** - Just paste a URL and go
-- **Pattern matching** - Include/exclude files with glob patterns
+- **Pattern matching** - Include/exclude files with glob patterns (supports multiple patterns)
 - **Beautiful progress** - Real-time download progress with speed and ETA
 - **Auto-retry** - Automatically retries failed downloads
 - **Parallel downloads** - Optional concurrent downloads (defaults to 1 to be server-friendly)
@@ -52,6 +52,10 @@ myrient-dl <url> --include "mario*"
 
 # Only .zip files
 myrient-dl <url> --include "*.zip"
+
+# Multiple patterns (OR logic - matches files that match ANY pattern)
+myrient-dl <url> --include "*.zip" --include "*.rar"
+myrient-dl <url> -i "mario*" -i "sonic*"
 ```
 
 ### Exclude files
@@ -60,8 +64,12 @@ myrient-dl <url> --include "*.zip"
 # Everything except prototypes
 myrient-dl <url> --exclude "proto*"
 
-# Combine include and exclude
-myrient-dl <url> --include "*.zip" --exclude "*japan*"
+# Multiple exclude patterns (OR logic - excludes files that match ANY pattern)
+myrient-dl <url> --exclude "*beta*" --exclude "*(Demo)*" --exclude "*Sample*"
+myrient-dl <url> -e "*proto*" -e "*japan*"
+
+# Combine multiple includes and excludes
+myrient-dl <url> -i "*.zip" -i "*.rar" -e "*beta*" -e "*japan*"
 ```
 
 ### Preview before downloading
@@ -92,8 +100,8 @@ myrient-dl [URL] [flags]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--output` | `-o` | Auto-detected | Output directory |
-| `--include` | `-i` | `*` | Include pattern (glob) |
-| `--exclude` | `-e` | None | Exclude pattern (glob) |
+| `--include` | `-i` | `*` | Include pattern (glob, repeatable) |
+| `--exclude` | `-e` | None | Exclude pattern (glob, repeatable) |
 | `--parallel` | `-p` | `1` | Number of parallel downloads |
 | `--dry-run` | | `false` | Preview what will be downloaded |
 | `--verbose` | `-v` | `false` | Verbose output |
